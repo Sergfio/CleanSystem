@@ -1,15 +1,15 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk # ttk ist neu für Tabs!
+from tkinter import filedialog, messagebox, ttk
 import os
 import shutil
 from datetime import datetime
 import subprocess
+import hashlib
 
 class FileSorterApp:
     def __init__(self, master):
         self.master = master
         master.title("🖼️ System- & Datei-Optimierer")
-        master.resizable(False, False)
         
         # --- Variablen für Sortierung ---
         self.source_dir = tk.StringVar(value="")
@@ -17,8 +17,10 @@ class FileSorterApp:
         self.sort_by_date = tk.BooleanVar(value=False)
         self.date_granularity = tk.StringVar(value="Year")
         
-        # Das Label für das Bereinigungsergebnis wird in setup_system_tab initialisiert
+        # Variablen für GUI-Elemente
         self.cleanup_result_label = None 
+        self.status_label = None
+        self.progress_bar = None
         
         self.setup_widgets()
         
@@ -90,11 +92,22 @@ class FileSorterApp:
                   bg="green", fg="white", 
                   font=('Arial', 12, 'bold')).pack(pady=10)
 
-        self.toggle_date_options() # Initial die Datums-Optionen ausblenden
+        self.toggle_date_options()
+        
+        # --- Fortschrittsanzeige ---
+        progress_frame = tk.LabelFrame(tab, text="✅ Sortierungsstatus", padx=10, pady=10)
+        progress_frame.pack(padx=10, pady=10, fill="x")
+
+        self.status_label = tk.Label(progress_frame, text="Warte auf Start...", anchor="w")
+        self.status_label.pack(fill="x", pady=(0, 5))
+
+        self.progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate", length=400)
+        self.progress_bar.pack(fill="x")
+        # ----------------------------------------
 
 
     def setup_system_tab(self, tab):
-        """Erstellt die Widgets für den System-Wartung Tab (NEU)."""
+        """Erstellt die Widgets für den System-Wartung Tab."""
         
         # --- 1. Temp-Dateien Bereinigung ---
         temp_frame = tk.LabelFrame(tab, text="🧹 Temporäre Dateien bereinigen", padx=10, pady=10)
@@ -104,11 +117,9 @@ class FileSorterApp:
                  text="Analysiere und lösche temporäre Dateien, um Speicherplatz freizugeben.",
                  justify=tk.LEFT).pack(anchor="w", pady=(0, 10))
                  
-        # Label für Analyse-Ergebnis (wird in self.cleanup_result_label gespeichert)
         self.cleanup_result_label = tk.Label(temp_frame, text="Status: Bereit zur Analyse.", fg="blue")
         self.cleanup_result_label.pack(anchor="w", pady=(5, 10))
         
-        # Button zur Analyse und Bereinigung
         tk.Button(temp_frame, 
                   text="🔍 Analyse & Bereinigung starten", 
                   command=lambda: self.run_temp_cleaner(is_cleanup=False),
@@ -116,8 +127,8 @@ class FileSorterApp:
         
         # --- 2. Winget Upgrade ---
         winget_frame = tk.LabelFrame(tab, text="⬆️ Software-Updates (Winget)", padx=10, pady=10)
-        winget_frame.pack(padx=10, pady=10, fill="x")
-
+        winget_frame.pack(padx=10, fill="x", pady=(10, 0))
+        
         tk.Label(winget_frame, 
                  text="Führt 'winget upgrade --all' aus. Aktualisiert alle installierten Programme.\n(Kann Administratorrechte erfordern!)",
                  justify=tk.LEFT).pack(anchor="w", pady=(0, 10))
@@ -126,6 +137,32 @@ class FileSorterApp:
                   text="🚀 Winget Upgrade starten", 
                   command=self.run_winget_upgrade,
                   bg="#27AE60", fg="white").pack(anchor="w", pady=(5, 0))
+                  
+        # --- 3. Duplikatssuche ---
+        duplicate_frame = tk.LabelFrame(tab, text="🔍 Doppelte Dateien finden", padx=10, pady=10)
+        duplicate_frame.pack(padx=10, fill="x", pady=(10, 0))
+
+        tk.Label(duplicate_frame, 
+                 text="Sucht im gewählten Ordner nach identischen Inhalten (SHA256 Hash).",
+                 justify=tk.LEFT).pack(anchor="w", pady=(0, 5))
+                 
+        tk.Button(duplicate_frame, 
+                  text="▶️ Duplikatssuche starten", 
+                  command=self.start_duplicate_search, 
+                  bg="#FFC300").pack(anchor="w", pady=(5, 0))
+
+        # --- 4. Ungültige Verknüpfungen (NEU) ---
+        shortcut_frame = tk.LabelFrame(tab, text="🔗 Ungültige Verknüpfungen finden", padx=10, pady=10)
+        shortcut_frame.pack(padx=10, fill="x", pady=(10, 0))
+
+        tk.Label(shortcut_frame, 
+                 text="Sucht nach kaputten '.lnk'-Dateien, deren Ziel nicht mehr existiert.",
+                 justify=tk.LEFT).pack(anchor="w", pady=(0, 5))
+                 
+        tk.Button(shortcut_frame, 
+                  text="▶️ Suche starten & bereinigen", 
+                  command=self.find_invalid_shortcuts, 
+                  bg="#FF8C00", fg="white").pack(anchor="w", pady=(5, 0))
 
 
     # --- Methoden für die Dateisortierung (Core) ---
@@ -157,6 +194,11 @@ class FileSorterApp:
             messagebox.showerror("Fehler", "Bitte mindestens ein Sortierkriterium (Dateiendung oder Datum) auswählen.")
             return
 
+        # VOR dem Start den Fortschritt zurücksetzen
+        self.progress_bar["value"] = 0
+        self.status_label.config(text="Vorbereitung...")
+        self.master.update()
+        
         confirm = messagebox.askyesno(
             "Achtung", 
             f"Soll die Sortierung im Ordner\n'{source}'\njetzt gestartet werden? \nDateien werden VERSCHOBEN."
@@ -168,6 +210,12 @@ class FileSorterApp:
                 messagebox.showinfo("Erfolg", f"✅ Sortierung abgeschlossen! \n{moved_count} Dateien wurden verschoben.")
             except Exception as e:
                 messagebox.showerror("Fehler", f"Ein Fehler ist aufgetreten: {e}")
+
+            # Nach Abschluss den Status auf Endzustand setzen
+            self.status_label.config(text="Sortierung abgeschlossen.")
+            self.progress_bar["value"] = self.progress_bar["maximum"] if self.progress_bar["maximum"] > 0 else 0
+            self.master.update()
+
 
     def get_creation_date_info(self, file_path, granularity):
         """
@@ -191,15 +239,38 @@ class FileSorterApp:
 
     def process_files(self, source_dir, sort_ext, sort_date, granularity):
         """
-        Iteriert über alle Dateien, bestimmt den Zielpfad und verschiebt die Dateien.
+        Iteriert über alle Dateien, bestimmt den Zielpfad, verschiebt die Dateien 
+        und aktualisiert den Fortschrittsbalken.
         """
+        # 1. Alle zu verarbeitenden Dateien im Voraus zählen
+        all_items = os.listdir(source_dir)
+        files_to_process = [
+            item for item in all_items 
+            if not os.path.isdir(os.path.join(source_dir, item)) and 
+               not os.path.islink(os.path.join(source_dir, item)) and
+               item != os.path.basename(__file__)
+        ]
+        total_files = len(files_to_process)
+        
+        if total_files == 0:
+            return 0 # Nichts zu tun
+
+        # Progress Bar einrichten
+        self.progress_bar["maximum"] = total_files
+        self.progress_bar["value"] = 0
+        self.status_label.config(text=f"Starte Sortierung von {total_files} Dateien...")
+        self.master.update()
+
         moved_files_count = 0
         
-        for item_name in os.listdir(source_dir):
+        for index, item_name in enumerate(files_to_process):
             source_path = os.path.join(source_dir, item_name)
 
-            if os.path.isdir(source_path) or os.path.islink(source_path) or item_name == os.path.basename(__file__):
-                continue
+            # --- Fortschritt aktualisieren (Feedback) ---
+            self.status_label.config(text=f"Verarbeite Datei {index + 1}/{total_files}: {item_name}")
+            self.progress_bar["value"] = index + 1
+            self.master.update() # Wichtig: Aktualisiert die GUI sofort
+            # -------------------------------------------
 
             target_folder_parts = []
             
@@ -239,23 +310,99 @@ class FileSorterApp:
             moved_files_count += 1
             
         return moved_files_count
+        
+    # --- Methoden für die Duplikatssuche ---
+    
+    def hash_file(self, filepath):
+        """Berechnet den SHA256-Hash einer Datei, blockweise für große Dateien."""
+        BLOCKSIZE = 65536 # 64 KB
+        hasher = hashlib.sha256()
+        try:
+            with open(filepath, 'rb') as afile:
+                buf = afile.read(BLOCKSIZE)
+                while len(buf) > 0:
+                    hasher.update(buf)
+                    buf = afile.read(BLOCKSIZE)
+            return hasher.hexdigest()
+        except Exception:
+            return None
 
-    # --- Methoden für die System-Wartung (NEU) ---
+    def find_duplicates(self, source_dir):
+        """Durchsucht den Ordner nach Dateien mit identischem Inhalt."""
+        
+        if not os.path.isdir(source_dir):
+            return "Fehler: Ungültiger Pfad."
+            
+        hashes = {}
+        duplicates_found = 0
+        
+        # Gehe rekursiv durch alle Ordner
+        for dirpath, dirnames, filenames in os.walk(source_dir):
+            dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+            
+            for filename in filenames:
+                filepath = os.path.join(dirpath, filename)
+                
+                if os.path.islink(filepath) or filename == os.path.basename(__file__):
+                    continue
+                
+                file_hash = self.hash_file(filepath)
+                
+                if file_hash:
+                    if file_hash in hashes:
+                        hashes[file_hash].append(filepath)
+                        duplicates_found += 1
+                    else:
+                        hashes[file_hash] = [filepath]
+
+        duplicate_sets = {h: paths for h, paths in hashes.items() if len(paths) > 1}
+        
+        if not duplicate_sets:
+            return "Keine doppelten Dateien gefunden."
+
+        message = f"✅ {duplicates_found} Duplikate in {len(duplicate_sets)} Sets gefunden.\n\n"
+        
+        # Ausgabe der ersten 5 Duplikat-Sets
+        i = 0
+        for h, paths in duplicate_sets.items():
+            if i >= 5:
+                message += f"\n... und {len(duplicate_sets) - 5} weitere Sets."
+                break
+            message += f"Set {i+1} ({len(paths)} Duplikate):\n"
+            for p in paths[1:]: 
+                message += f"  - {p}\n"
+            i += 1
+             
+        return message
+
+    def start_duplicate_search(self):
+        """Startet die Duplikatssuche und zeigt das Ergebnis an."""
+        source = filedialog.askdirectory(title="Ordner für Duplikatssuche wählen")
+        
+        if source:
+            messagebox.showinfo("Duplikatssuche gestartet", f"Suche nach Duplikaten in: {source}. Dies kann bei großen Ordnern dauern.")
+            
+            result_message = self.find_duplicates(source)
+            
+            messagebox.showinfo("Duplikatsergebnisse", result_message)
+        else:
+            messagebox.showwarning("Abgebrochen", "Duplikatssuche wurde abgebrochen.")
+
+    # --- Methoden für die System-Wartung ---
 
     def run_winget_upgrade(self):
         """Führt das Winget-Upgrade für alle installierten Pakete aus."""
-        # Sicherheitsfrage, da Admin-Rechte nötig sein können
         if not messagebox.askyesno("Upgrade bestätigen", "Soll Winget alle installierten Programme aktualisieren? Dies kann Administratorrechte erfordern."):
             return
 
         try:
-            # Der Befehl, der alle Winget-Pakete aktualisiert
             result = subprocess.run(
                 ["winget", "upgrade", "--all", "--accept-source-agreements", "--accept-package-agreements"],
                 capture_output=True,
                 text=True,
                 check=True,
-                shell=True
+                shell=True,
+                encoding="utf-8"
             )
 
             messagebox.showinfo("Winget Upgrade", f"Upgrade-Vorgang abgeschlossen! Details:\n{result.stdout[:500]}...")
@@ -265,15 +412,16 @@ class FileSorterApp:
 
         except FileNotFoundError:
             messagebox.showerror("Winget Fehler", "Der Befehl 'winget' (Windows Package Manager) wurde nicht gefunden.")
+        except UnicodeDecodeError:
+            messagebox.showerror("Kodierungsfehler", "Fehler beim Lesen der Winget-Ausgabe.")
+
 
     def clean_temp_files(self, dry_run=True):
         """
         Sucht temporäre Dateien in bekannten Verzeichnissen und meldet die Funde.
-        Bei dry_run=False wird gelöscht.
         """
         temp_dirs = [
-            os.environ.get('TEMP'),             # Lokale Benutzer-Temp-Dateien
-            os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'Temp') # System-Temp
+            os.environ.get('TEMP'), 
         ]
 
         deleted_count = 0
@@ -295,7 +443,6 @@ class FileSorterApp:
                             deleted_size += item_size
 
                     elif os.path.isdir(item_path):
-                        # Lösche leere Ordner oder rekursiv nicht-leere
                         if not os.listdir(item_path) and not dry_run:
                             os.rmdir(item_path)
                         elif not dry_run:
@@ -318,19 +465,77 @@ class FileSorterApp:
         result = self.clean_temp_files(dry_run=not is_cleanup)
         
         if is_cleanup:
-            # Nach der eigentlichen Bereinigung
             messagebox.showinfo("Bereinigung", result)
         else:
-            # Nach der Analyse (dry-run)
             self.cleanup_result_label.config(text=result)
             
             if "0 Elemente" not in result:
                  if messagebox.askyesno("Bereinigung starten?", 
                                         f"Sollen die gefundenen Dateien jetzt endgültig gelöscht werden?\n{result}"):
-                    # Starte die echte Bereinigung
                     self.run_temp_cleaner(is_cleanup=True)
             else:
                 messagebox.showinfo("Bereinigung", "Keine temporären Dateien gefunden, die gelöscht werden müssen.")
+
+    def find_invalid_shortcuts(self):
+        """
+        Sucht rekursiv nach ungültigen .lnk-Dateien, indem PowerShell 
+        verwendet wird, um deren Zielpfade zu prüfen.
+        """
+        source_dir = filedialog.askdirectory(title="Ordner für die Suche nach ungültigen Verknüpfungen wählen")
+        if not source_dir:
+            return
+
+        invalid_shortcuts = []
+        
+        for root, dirs, files in os.walk(source_dir):
+            for file in files:
+                if file.lower().endswith('.lnk'):
+                    filepath = os.path.join(root, file)
+                    
+                    # PowerShell-Befehl, um den Zielpfad der Verknüpfung zu erhalten und zu prüfen
+                    powershell_command = (
+                        f"powershell -ExecutionPolicy Bypass -Command \"$link = Get-Item -LiteralPath '{filepath}' -ErrorAction SilentlyContinue; "
+                        f"if ($link.Target -eq $null) {{ Write-Host 'INVALID' }} else {{ Write-Host 'VALID' }}\""
+                    )
+                    
+                    try:
+                        result = subprocess.run(
+                            powershell_command, 
+                            capture_output=True, 
+                            text=True, 
+                            check=True, 
+                            encoding="utf-8"
+                        )
+                        
+                        if 'INVALID' in result.stdout.strip().upper():
+                            invalid_shortcuts.append(filepath)
+                            
+                    except Exception as e:
+                        print(f"Fehler bei Verknüpfung {filepath}: {e}")
+                        continue
+        
+        if not invalid_shortcuts:
+            messagebox.showinfo("Ergebnis", "Keine ungültigen Verknüpfungen gefunden.")
+            return
+
+        message = f"✅ {len(invalid_shortcuts)} ungültige Verknüpfungen gefunden:\n\n"
+        
+        message += "\n".join(invalid_shortcuts[:10])
+        if len(invalid_shortcuts) > 10:
+             message += f"\n... und {len(invalid_shortcuts) - 10} weitere."
+
+        messagebox.showinfo("Ungültige Verknüpfungen", message)
+        
+        # Option zum Löschen anbieten
+        if messagebox.askyesno("Löschen bestätigen", f"Sollen {len(invalid_shortcuts)} ungültige Verknüpfungen jetzt gelöscht werden?"):
+            deleted_count = 0
+            for shortcut in invalid_shortcuts:
+                try:
+                    os.remove(shortcut)
+                    deleted_count += 1
+                except Exception:
+                    continue
+            messagebox.showinfo("Löschung abgeschlossen", f"Es wurden {deleted_count} ungültige Verknüpfungen gelöscht.")
 
 
 # --- App starten ---
