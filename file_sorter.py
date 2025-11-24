@@ -1,43 +1,56 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+import customtkinter as ctk  
+import tkinter as tk         
+from tkinter import filedialog, messagebox
 import os
 import shutil
 from datetime import datetime
 import subprocess
 import hashlib
-import winreg # NEU: Für den Zugriff auf die Windows Registry
+import winreg       
+import threading    
 
 class FileSorterApp:
     def __init__(self, master):
         self.master = master
-        master.title("🖼️ System- & Datei-Optimierer")
         
-        # --- Variablen für Sortierung ---
-        self.source_dir = tk.StringVar(value="")
-        self.sort_by_extension = tk.BooleanVar(value=True) 
-        self.sort_by_date = tk.BooleanVar(value=False)
-        self.date_granularity = tk.StringVar(value="Year")
+        # --- DESIGN & SKRIPT-IDENTIFIKATION ---
+        ctk.set_appearance_mode("System")  
+        ctk.set_default_color_theme("blue") 
         
-        # Variablen für GUI-Elemente (werden in setup_widgets initialisiert)
+        try:
+            self.current_script_name = os.path.basename(__file__)
+        except NameError:
+            self.current_script_name = "file_sorter.py"
+        
+        master.title("System- & Datei-Optimierer")
+        
+        # --- Variablen ---
+        self.source_dir = ctk.StringVar(value="") 
+        self.sort_by_extension = ctk.BooleanVar(value=True) 
+        self.sort_by_date = ctk.BooleanVar(value=False)
+        self.date_granularity = ctk.StringVar(value="Year")
+        
+        # Variablen für GUI-Elemente
         self.cleanup_result_label = None 
         self.status_label = None
         self.progress_bar = None
+        self.clean_button = None
+        self.dup_button = None
+        self.temp_thread = None  
+        self.dup_thread = None   
         
         self.setup_widgets()
         
     def setup_widgets(self):
         """Erstellt die Tab-Struktur und ruft die Einrichtungsfunktionen für jeden Tab auf."""
         
-        # 1. Notebook (Tab-Control) erstellen
-        self.notebook = ttk.Notebook(self.master)
+        # 1. Notebook (Tab-Control) durch CTkTabview ersetzen
+        self.notebook = ctk.CTkTabview(self.master)
         self.notebook.pack(pady=10, padx=10, fill="both", expand=True)
         
         # 2. Tabs erstellen
-        self.tab_sorter = tk.Frame(self.notebook, padx=5, pady=5)
-        self.tab_system = tk.Frame(self.notebook, padx=5, pady=5)
-        
-        self.notebook.add(self.tab_sorter, text="📁 Datei-Sortierung")
-        self.notebook.add(self.tab_system, text="🧹 System-Wartung")
+        self.tab_sorter = self.notebook.add("📁 Datei-Sortierung")
+        self.tab_system = self.notebook.add("🧹 System-Wartung")
         
         # 3. Widgets für jeden Tab einrichten
         self.setup_sorter_tab(self.tab_sorter)
@@ -47,62 +60,67 @@ class FileSorterApp:
         """Erstellt die Widgets für den Datei-Sorter Tab."""
         
         # Frame für die Verzeichnisauswahl
-        dir_frame = tk.LabelFrame(tab, text="📁 1. Quellordner auswählen", padx=10, pady=10)
+        dir_frame = ctk.CTkFrame(tab)
         dir_frame.pack(padx=10, pady=10, fill="x")
         
-        tk.Label(dir_frame, text="Pfad:").pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkLabel(dir_frame, text="📁 1. Quellordner auswählen").pack(anchor="w", pady=(0, 5))
         
-        entry = tk.Entry(dir_frame, textvariable=self.source_dir, width=50, state='readonly')
+        ctk.CTkLabel(dir_frame, text="Pfad:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        entry = ctk.CTkEntry(dir_frame, textvariable=self.source_dir, width=350)
         entry.pack(side=tk.LEFT, fill="x", expand=True, padx=(0, 5))
+        entry.configure(state=tk.DISABLED) 
         
-        tk.Button(dir_frame, text="Durchsuchen...", command=self.browse_directory).pack(side=tk.LEFT)
+        ctk.CTkButton(dir_frame, text="Durchsuchen...", command=self.browse_directory).pack(side=tk.LEFT)
         
         # Frame 2: Kriterien-Auswahl
-        criteria_frame = tk.LabelFrame(tab, text="⚙️ 2. Sortierkriterien wählen", padx=10, pady=10)
+        criteria_frame = ctk.CTkFrame(tab)
         criteria_frame.pack(padx=10, pady=10, fill="x")
         
-        # Checkbox: Sortieren nach Endung (z.B. JPG, PDF)
-        tk.Checkbutton(criteria_frame, 
-                       text="Nach Dateiendung sortieren (Ordnernamen in Großbuchstaben)", 
-                       variable=self.sort_by_extension).pack(anchor="w")
+        ctk.CTkLabel(criteria_frame, text="⚙️ 2. Sortierkriterien wählen").pack(anchor="w", pady=(0, 5))
         
-        # Checkbox: Sortieren nach Datum
-        tk.Checkbutton(criteria_frame, 
-                       text="Nach Erstellungsdatum sortieren (erzeugt Unterordner)", 
-                       variable=self.sort_by_date, 
-                       command=self.toggle_date_options).pack(anchor="w", pady=(5, 0))
+        ctk.CTkCheckBox(criteria_frame, 
+                        text="Nach Dateiendung sortieren (Ordnernamen in Großbuchstaben)", 
+                        variable=self.sort_by_extension).pack(anchor="w")
+        
+        ctk.CTkCheckBox(criteria_frame, 
+                        text="Nach Erstellungsdatum sortieren (erzeugt Unterordner)", 
+                        variable=self.sort_by_date, 
+                        command=self.toggle_date_options).pack(anchor="w", pady=(5, 0))
 
         # Datum-Granularität (Unteroptionen)
-        self.date_options_frame = tk.Frame(criteria_frame, padx=20)
+        self.date_options_frame = ctk.CTkFrame(criteria_frame)
         
-        tk.Label(self.date_options_frame, text="Datum-Detailgrad:").pack(side=tk.LEFT)
+        ctk.CTkLabel(self.date_options_frame, text="Datum-Detailgrad:").pack(side=tk.LEFT, padx=(15, 0))
         
         granularity = [("Jahr (2025)", "Year"), ("Jahr/Monat (2025-11)", "Month"), ("Jahr/Monat/Tag (2025-11-15)", "Day")]
         for text, value in granularity:
-            tk.Radiobutton(self.date_options_frame, 
+            ctk.CTkRadioButton(self.date_options_frame, 
                            text=text, 
                            variable=self.date_granularity, 
-                           value=value).pack(side=tk.LEFT, padx=5)
+                           value=value).pack(side=tk.LEFT, padx=10)
 
         # Start-Button
-        tk.Frame(tab, height=1, bg="gray").pack(fill="x", padx=10, pady=5)
+        ctk.CTkFrame(tab, height=1).pack(fill="x", padx=10, pady=5) 
         
-        tk.Button(tab, 
+        ctk.CTkButton(tab, 
                   text="🚀 Sortierung starten!", 
                   command=self.start_sorting, 
-                  bg="green", fg="white", 
-                  font=('Arial', 12, 'bold')).pack(pady=10)
+                  font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10) 
 
         self.toggle_date_options()
         
         # --- Fortschrittsanzeige ---
-        progress_frame = tk.LabelFrame(tab, text="✅ Sortierungsstatus", padx=10, pady=10)
+        progress_frame = ctk.CTkFrame(tab)
         progress_frame.pack(padx=10, pady=10, fill="x")
 
-        self.status_label = tk.Label(progress_frame, text="Warte auf Start...", anchor="w")
+        ctk.CTkLabel(progress_frame, text="✅ Sortierungsstatus").pack(anchor="w")
+
+        self.status_label = ctk.CTkLabel(progress_frame, text="Warte auf Start...", anchor="w")
         self.status_label.pack(fill="x", pady=(0, 5))
 
-        self.progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate", length=400)
+        self.progress_bar = ctk.CTkProgressBar(progress_frame, orientation="horizontal")
+        self.progress_bar.set(0)
         self.progress_bar.pack(fill="x")
         # ----------------------------------------
 
@@ -111,72 +129,83 @@ class FileSorterApp:
         """Erstellt die Widgets für den System-Wartung Tab."""
         
         # --- 1. Temp-Dateien Bereinigung ---
-        temp_frame = tk.LabelFrame(tab, text="🧹 Temporäre Dateien bereinigen", padx=10, pady=10)
+        temp_frame = ctk.CTkFrame(tab)
         temp_frame.pack(padx=10, pady=10, fill="x")
         
-        tk.Label(temp_frame, 
+        ctk.CTkLabel(temp_frame, text="🧹 Temporäre Dateien bereinigen").pack(anchor="w")
+
+        ctk.CTkLabel(temp_frame, 
                  text="Analysiere und lösche temporäre Dateien, um Speicherplatz freizugeben.",
                  justify=tk.LEFT).pack(anchor="w", pady=(0, 10))
                  
-        self.cleanup_result_label = tk.Label(temp_frame, text="Status: Bereit zur Analyse.", fg="blue")
+        self.cleanup_result_label = ctk.CTkLabel(temp_frame, text="Status: Bereit zur Analyse.", text_color="blue")
         self.cleanup_result_label.pack(anchor="w", pady=(5, 10))
         
-        tk.Button(temp_frame, 
+        self.clean_button = ctk.CTkButton(temp_frame, 
                   text="🔍 Analyse & Bereinigung starten", 
-                  command=lambda: self.run_temp_cleaner(is_cleanup=False),
-                  bg="#4A90E2", fg="white").pack(anchor="w", pady=(5, 0))
+                  command=lambda: self.run_temp_cleaner(is_cleanup=False))
+        self.clean_button.pack(anchor="w", pady=(5, 0))
         
         # --- 2. Winget Upgrade ---
-        winget_frame = tk.LabelFrame(tab, text="⬆️ Software-Updates (Winget)", padx=10, pady=10)
+        winget_frame = ctk.CTkFrame(tab)
         winget_frame.pack(padx=10, fill="x", pady=(10, 0))
         
-        tk.Label(winget_frame, 
+        ctk.CTkLabel(winget_frame, text="⬆️ Software-Updates (Winget)").pack(anchor="w")
+
+        ctk.CTkLabel(winget_frame, 
                  text="Führt 'winget upgrade --all' aus. Aktualisiert alle installierten Programme.\n(Kann Administratorrechte erfordern!)",
                  justify=tk.LEFT).pack(anchor="w", pady=(0, 10))
                  
-        tk.Button(winget_frame, 
+        ctk.CTkButton(winget_frame, 
                   text="🚀 Winget Upgrade starten", 
-                  command=self.run_winget_upgrade,
-                  bg="#27AE60", fg="white").pack(anchor="w", pady=(5, 0))
+                  fg_color="green", hover_color="#27AE60",
+                  command=self.run_winget_upgrade).pack(anchor="w", pady=(5, 0))
                   
         # --- 3. Duplikatssuche ---
-        duplicate_frame = tk.LabelFrame(tab, text="🔍 Doppelte Dateien finden", padx=10, pady=10)
+        duplicate_frame = ctk.CTkFrame(tab)
         duplicate_frame.pack(padx=10, fill="x", pady=(10, 0))
 
-        tk.Label(duplicate_frame, 
+        ctk.CTkLabel(duplicate_frame, text="🔍 Doppelte Dateien finden").pack(anchor="w")
+
+        ctk.CTkLabel(duplicate_frame, 
                  text="Sucht im gewählten Ordner nach identischen Inhalten (SHA256 Hash).",
                  justify=tk.LEFT).pack(anchor="w", pady=(0, 5))
                  
-        tk.Button(duplicate_frame, 
+        self.dup_button = ctk.CTkButton(duplicate_frame, 
                   text="▶️ Duplikatssuche starten", 
-                  command=self.start_duplicate_search, 
-                  bg="#FFC300").pack(anchor="w", pady=(5, 0))
+                  fg_color="#FF8000", hover_color="#D86B00", # Orange Töne
+                  command=self.start_duplicate_search)
+        self.dup_button.pack(anchor="w", pady=(5, 0))
 
         # --- 4. Ungültige Verknüpfungen ---
-        shortcut_frame = tk.LabelFrame(tab, text="🔗 Ungültige Verknüpfungen finden", padx=10, pady=10)
+        shortcut_frame = ctk.CTkFrame(tab)
         shortcut_frame.pack(padx=10, fill="x", pady=(10, 0))
+        
+        ctk.CTkLabel(shortcut_frame, text="🔗 Ungültige Verknüpfungen finden").pack(anchor="w")
 
-        tk.Label(shortcut_frame, 
+        ctk.CTkLabel(shortcut_frame, 
                  text="Sucht nach kaputten '.lnk'-Dateien, deren Ziel nicht mehr existiert.",
                  justify=tk.LEFT).pack(anchor="w", pady=(0, 5))
                  
-        tk.Button(shortcut_frame, 
+        ctk.CTkButton(shortcut_frame, 
                   text="▶️ Suche starten & bereinigen", 
-                  command=self.find_invalid_shortcuts, 
-                  bg="#FF8C00", fg="white").pack(anchor="w", pady=(5, 0))
+                  fg_color="#FF8C00", hover_color="#D87800", # Dunkleres Orange
+                  command=self.find_invalid_shortcuts).pack(anchor="w", pady=(5, 0))
                   
-        # --- 5. Autostart-Verwaltung (NEU) ---
-        autostart_frame = tk.LabelFrame(tab, text="⏱️ Autostart-Programme", padx=10, pady=10)
+        # --- 5. Autostart-Verwaltung ---
+        autostart_frame = ctk.CTkFrame(tab)
         autostart_frame.pack(padx=10, fill="x", pady=(10, 0))
 
-        tk.Label(autostart_frame, 
+        ctk.CTkLabel(autostart_frame, text="⏱️ Autostart-Programme").pack(anchor="w")
+
+        ctk.CTkLabel(autostart_frame, 
                  text="Listet Programme auf, die beim Start geladen werden, und öffnet den Task Manager zur Deaktivierung.",
                  justify=tk.LEFT).pack(anchor="w", pady=(0, 5))
                  
-        tk.Button(autostart_frame, 
+        ctk.CTkButton(autostart_frame, 
                   text="▶️ Autostart prüfen & verwalten", 
-                  command=self.manage_autostart, 
-                  bg="#FF3333", fg="white").pack(anchor="w", pady=(5, 0))
+                  fg_color="red", hover_color="#CC0000",
+                  command=self.manage_autostart).pack(anchor="w", pady=(5, 0))
 
 
     # --- Methoden für die Dateisortierung (Core) ---
@@ -209,8 +238,8 @@ class FileSorterApp:
             return
 
         # VOR dem Start den Fortschritt zurücksetzen
-        self.progress_bar["value"] = 0
-        self.status_label.config(text="Vorbereitung...")
+        self.progress_bar.set(0)
+        self.status_label.configure(text="Vorbereitung...")
         self.master.update()
         
         confirm = messagebox.askyesno(
@@ -226,8 +255,8 @@ class FileSorterApp:
                 messagebox.showerror("Fehler", f"Ein Fehler ist aufgetreten: {e}")
 
             # Nach Abschluss den Status auf Endzustand setzen
-            self.status_label.config(text="Sortierung abgeschlossen.")
-            self.progress_bar["value"] = self.progress_bar["maximum"] if self.progress_bar["maximum"] > 0 else 0
+            self.status_label.configure(text="Sortierung abgeschlossen.")
+            self.progress_bar.set(1.0) 
             self.master.update()
 
 
@@ -254,7 +283,7 @@ class FileSorterApp:
     def process_files(self, source_dir, sort_ext, sort_date, granularity):
         """
         Iteriert über alle Dateien, bestimmt den Zielpfad, verschiebt die Dateien 
-        und aktualisiert den Fortschrittsbalken.
+        und aktualisiert den Fortschrittsbalken. 
         """
         # 1. Alle zu verarbeitenden Dateien im Voraus zählen
         all_items = os.listdir(source_dir)
@@ -262,17 +291,16 @@ class FileSorterApp:
             item for item in all_items 
             if not os.path.isdir(os.path.join(source_dir, item)) and 
                not os.path.islink(os.path.join(source_dir, item)) and
-               item != os.path.basename(__file__)
+               item != self.current_script_name # Skript wird ignoriert
         ]
         total_files = len(files_to_process)
         
         if total_files == 0:
             return 0 # Nichts zu tun
 
-        # Progress Bar einrichten
-        self.progress_bar["maximum"] = total_files
-        self.progress_bar["value"] = 0
-        self.status_label.config(text=f"Starte Sortierung von {total_files} Dateien...")
+        # Progress Bar einrichten (Wertebereich 0.0 bis 1.0 in CTk)
+        self.progress_bar.set(0)
+        self.status_label.configure(text=f"Starte Sortierung von {total_files} Dateien...")
         self.master.update()
 
         moved_files_count = 0
@@ -281,9 +309,10 @@ class FileSorterApp:
             source_path = os.path.join(source_dir, item_name)
 
             # --- Fortschritt aktualisieren (Feedback) ---
-            self.status_label.config(text=f"Verarbeite Datei {index + 1}/{total_files}: {item_name}")
-            self.progress_bar["value"] = index + 1
-            self.master.update() # Wichtig: Aktualisiert die GUI sofort
+            progress_value = (index + 1) / total_files
+            self.status_label.configure(text=f"Verarbeite Datei {index + 1}/{total_files}: {item_name}")
+            self.progress_bar.set(progress_value)
+            self.master.update() 
             # -------------------------------------------
 
             target_folder_parts = []
@@ -325,7 +354,7 @@ class FileSorterApp:
             
         return moved_files_count
         
-    # --- Methoden für die Duplikatssuche ---
+    # --- Methoden für die Duplikatssuche (Multithreaded) ---
     
     def hash_file(self, filepath):
         """Berechnet den SHA256-Hash einer Datei, blockweise für große Dateien."""
@@ -357,7 +386,7 @@ class FileSorterApp:
             for filename in filenames:
                 filepath = os.path.join(dirpath, filename)
                 
-                if os.path.islink(filepath) or filename == os.path.basename(__file__):
+                if os.path.islink(filepath) or filename == self.current_script_name:
                     continue
                 
                 file_hash = self.hash_file(filepath)
@@ -390,22 +419,48 @@ class FileSorterApp:
         return message
 
     def start_duplicate_search(self):
-        """Startet die Duplikatssuche und zeigt das Ergebnis an."""
-        source = filedialog.askdirectory(title="Ordner für Duplikatssuche wählen")
+        """Startet die Duplikatssuche im Hintergrund und zeigt das Ergebnis an."""
         
-        if source:
-            messagebox.showinfo("Duplikatssuche gestartet", f"Suche nach Duplikaten in: {source}. Dies kann bei großen Ordnern dauern.")
+        source = filedialog.askdirectory(title="Ordner für Duplikatssuche wählen")
+        if not source:
+            messagebox.showwarning("Abgebrochen", "Duplikatssuche wurde abgebrochen.")
+            return
+
+        # PRÜFUNG: Ist der Thread bereits aktiv oder None?
+        is_thread_running = self.dup_thread is not None and self.dup_thread.is_alive()
+        
+        if is_thread_running:
+             messagebox.showwarning("Läuft bereits", "Die Duplikatssuche läuft bereits. Bitte warten Sie, bis der aktuelle Vorgang beendet ist.")
+             return
+
+        # Funktion, die im separaten Thread ausgeführt wird
+        def duplicate_worker():
+            self.set_system_status("Duplikatssuche läuft...", True)
+            self.dup_button.configure(state=tk.DISABLED) 
             
             result_message = self.find_duplicates(source)
             
-            messagebox.showinfo("Duplikatsergebnisse", result_message)
-        else:
-            messagebox.showwarning("Abgebrochen", "Duplikatssuche wurde abgebrochen.")
+            self.set_system_status("Status: Bereit zur Analyse.", False)
+            self.dup_button.configure(state=tk.NORMAL) 
+            
+            # Messagebox muss im Hauptthread angezeigt werden: master.after
+            self.master.after(10, lambda: messagebox.showinfo("Duplikatsergebnisse", result_message))
 
-    # --- Methoden für die System-Wartung ---
+        # Starte den Thread
+        self.dup_thread = threading.Thread(target=duplicate_worker)
+        self.dup_thread.start()
 
+    # --- Methoden für die System-Wartung (Multithreaded) ---
+    
+    def set_system_status(self, message, is_running):
+        """Aktualisiert das Bereinigungs-Label und steuert die Farben."""
+        if self.cleanup_result_label:
+            # CTk Widgets verwenden configure()
+            self.cleanup_result_label.configure(text=message, text_color="red" if is_running else "blue")
+            self.master.update()
+            
     def run_winget_upgrade(self):
-        """Führt das Winget-Upgrade für alle installierten Pakete aus."""
+        """Führt das Winget-Upgrade für alle installierten Pakete aus. (Im Hauptthread)"""
         if not messagebox.askyesno("Upgrade bestätigen", "Soll Winget alle installierten Programme aktualisieren? Dies kann Administratorrechte erfordern."):
             return
 
@@ -475,20 +530,42 @@ class FileSorterApp:
             return f"✅ Bereinigung abgeschlossen: {deleted_count} Elemente ({size_mb:.2f} MB) gelöscht."
 
     def run_temp_cleaner(self, is_cleanup=False):
-        """Startet die Analyse oder die eigentliche Bereinigung und fragt den Benutzer."""
-        result = self.clean_temp_files(dry_run=not is_cleanup)
+        """Startet die Analyse oder die eigentliche Bereinigung im Hintergrund."""
         
-        if is_cleanup:
-            messagebox.showinfo("Bereinigung", result)
-        else:
-            self.cleanup_result_label.config(text=result)
+        # PRÜFUNG: Ist der Thread bereits aktiv oder None?
+        is_thread_running = self.temp_thread is not None and self.temp_thread.is_alive()
+        
+        if is_thread_running:
+             messagebox.showwarning("Läuft bereits", "Die Bereinigung läuft bereits. Bitte warten Sie.")
+             return
+
+        # Funktion, die im separaten Thread ausgeführt wird
+        def cleanup_worker():
+            self.set_system_status("Reinigung läuft...", True)
+            self.clean_button.configure(state=tk.DISABLED) 
             
-            if "0 Elemente" not in result:
-                 if messagebox.askyesno("Bereinigung starten?", 
-                                        f"Sollen die gefundenen Dateien jetzt endgültig gelöscht werden?\n{result}"):
-                    self.run_temp_cleaner(is_cleanup=True)
+            result = self.clean_temp_files(dry_run=not is_cleanup)
+            
+            self.set_system_status("Status: Bereit zur Analyse.", False)
+            self.clean_button.configure(state=tk.NORMAL)
+            
+            if is_cleanup:
+                self.master.after(10, lambda: messagebox.showinfo("Bereinigung", result))
             else:
-                messagebox.showinfo("Bereinigung", "Keine temporären Dateien gefunden, die gelöscht werden müssen.")
+                self.cleanup_result_label.configure(text=result)
+                
+                if "0 Elemente" not in result:
+                     if messagebox.askyesno("Bereinigung starten?", 
+                                            f"Sollen die gefundenen Dateien jetzt endgültig gelöscht werden?\n{result}"):
+                        # Starte die echte Bereinigung (erneuter Thread-Start)
+                        self.run_temp_cleaner(is_cleanup=True)
+                else:
+                    self.master.after(10, lambda: messagebox.showinfo("Bereinigung", "Keine temporären Dateien gefunden, die gelöscht werden müssen."))
+        
+        # Starte den Thread
+        self.temp_thread = threading.Thread(target=cleanup_worker)
+        self.temp_thread.start()
+
 
     def find_invalid_shortcuts(self):
         """
@@ -549,7 +626,7 @@ class FileSorterApp:
                     continue
             messagebox.showinfo("Löschung abgeschlossen", f"Es wurden {deleted_count} ungültige Verknüpfungen gelöscht.")
 
-    # --- NEUE FUNKTION: Autostart-Verwaltung ---
+    # --- Autostart-Verwaltung ---
 
     def get_autostart_entries(self):
         """Liest Autostart-Einträge aus HKLM und HKCU."""
@@ -567,7 +644,7 @@ class FileSorterApp:
                     entries.append({'name': name, 'path': value, 'key': 'HKCU'})
                     i += 1
                 except OSError:
-                    break # Ende der Liste
+                    break 
             winreg.CloseKey(reg_key)
         except Exception:
             pass
@@ -599,8 +676,7 @@ class FileSorterApp:
             messagebox.showinfo("Autostart", "Keine konfigurierbaren Autostart-Einträge in der Registry gefunden.")
             return
 
-        # Zeige die Einträge in einer Meldung an
-        entry_list = "\n".join([f"[{e['key']}] {e['name']}" for e in autostart_entries[:10]]) # Zeige nur die ersten 10
+        entry_list = "\n".join([f"[{e['key']}] {e['name']}" for e in autostart_entries[:10]])
         
         message = f"Gefundene Autostart-Einträge ({len(autostart_entries)} insgesamt):\n\n"
         message += entry_list
@@ -609,16 +685,14 @@ class FileSorterApp:
         
         messagebox.showinfo("Autostart-Einträge", message)
         
-        # Biete an, den Task Manager zu öffnen
         if not messagebox.askyesno("Autostart verwalten", "Möchtest du nun die Windows-Einstellungen (Task Manager) öffnen, um die Programme manuell zu deaktivieren?"):
             return
             
-        # Öffne Task Manager > Autostart (Funktioniert ab Win 8)
         subprocess.run(["taskmgr", "/0 /startup"], check=False)
 
 
 # --- App starten ---
 if __name__ == "__main__":
-    root = tk.Tk()
+    root = ctk.CTk() 
     app = FileSorterApp(root)
     root.mainloop()
