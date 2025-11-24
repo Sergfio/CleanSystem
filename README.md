@@ -71,4 +71,4 @@ Wenn du das Programm aus dem Quellcode ausführen möchtest:
 
 ## 📄 Lizenz
 
-Dieses Projekt steht unter der [Hier Lizenz einfügen, z.B. MIT License].
+Dieses Projekt steht unter der [MIT License].
