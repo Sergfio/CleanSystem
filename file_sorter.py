@@ -5,6 +5,7 @@ import shutil
 from datetime import datetime
 import subprocess
 import hashlib
+import winreg # NEU: Für den Zugriff auf die Windows Registry
 
 class FileSorterApp:
     def __init__(self, master):
@@ -17,7 +18,7 @@ class FileSorterApp:
         self.sort_by_date = tk.BooleanVar(value=False)
         self.date_granularity = tk.StringVar(value="Year")
         
-        # Variablen für GUI-Elemente
+        # Variablen für GUI-Elemente (werden in setup_widgets initialisiert)
         self.cleanup_result_label = None 
         self.status_label = None
         self.progress_bar = None
@@ -151,7 +152,7 @@ class FileSorterApp:
                   command=self.start_duplicate_search, 
                   bg="#FFC300").pack(anchor="w", pady=(5, 0))
 
-        # --- 4. Ungültige Verknüpfungen (NEU) ---
+        # --- 4. Ungültige Verknüpfungen ---
         shortcut_frame = tk.LabelFrame(tab, text="🔗 Ungültige Verknüpfungen finden", padx=10, pady=10)
         shortcut_frame.pack(padx=10, fill="x", pady=(10, 0))
 
@@ -163,6 +164,19 @@ class FileSorterApp:
                   text="▶️ Suche starten & bereinigen", 
                   command=self.find_invalid_shortcuts, 
                   bg="#FF8C00", fg="white").pack(anchor="w", pady=(5, 0))
+                  
+        # --- 5. Autostart-Verwaltung (NEU) ---
+        autostart_frame = tk.LabelFrame(tab, text="⏱️ Autostart-Programme", padx=10, pady=10)
+        autostart_frame.pack(padx=10, fill="x", pady=(10, 0))
+
+        tk.Label(autostart_frame, 
+                 text="Listet Programme auf, die beim Start geladen werden, und öffnet den Task Manager zur Deaktivierung.",
+                 justify=tk.LEFT).pack(anchor="w", pady=(0, 5))
+                 
+        tk.Button(autostart_frame, 
+                  text="▶️ Autostart prüfen & verwalten", 
+                  command=self.manage_autostart, 
+                  bg="#FF3333", fg="white").pack(anchor="w", pady=(5, 0))
 
 
     # --- Methoden für die Dateisortierung (Core) ---
@@ -492,7 +506,6 @@ class FileSorterApp:
                 if file.lower().endswith('.lnk'):
                     filepath = os.path.join(root, file)
                     
-                    # PowerShell-Befehl, um den Zielpfad der Verknüpfung zu erhalten und zu prüfen
                     powershell_command = (
                         f"powershell -ExecutionPolicy Bypass -Command \"$link = Get-Item -LiteralPath '{filepath}' -ErrorAction SilentlyContinue; "
                         f"if ($link.Target -eq $null) {{ Write-Host 'INVALID' }} else {{ Write-Host 'VALID' }}\""
@@ -526,7 +539,6 @@ class FileSorterApp:
 
         messagebox.showinfo("Ungültige Verknüpfungen", message)
         
-        # Option zum Löschen anbieten
         if messagebox.askyesno("Löschen bestätigen", f"Sollen {len(invalid_shortcuts)} ungültige Verknüpfungen jetzt gelöscht werden?"):
             deleted_count = 0
             for shortcut in invalid_shortcuts:
@@ -536,6 +548,73 @@ class FileSorterApp:
                 except Exception:
                     continue
             messagebox.showinfo("Löschung abgeschlossen", f"Es wurden {deleted_count} ungültige Verknüpfungen gelöscht.")
+
+    # --- NEUE FUNKTION: Autostart-Verwaltung ---
+
+    def get_autostart_entries(self):
+        """Liest Autostart-Einträge aus HKLM und HKCU."""
+        entries = []
+        
+        # 1. Benutzer-spezifische Einträge (HKEY_CURRENT_USER)
+        try:
+            reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 
+                                     r"Software\Microsoft\Windows\CurrentVersion\Run", 
+                                     0, winreg.KEY_READ)
+            i = 0
+            while True:
+                try:
+                    name, value, type = winreg.EnumValue(reg_key, i)
+                    entries.append({'name': name, 'path': value, 'key': 'HKCU'})
+                    i += 1
+                except OSError:
+                    break # Ende der Liste
+            winreg.CloseKey(reg_key)
+        except Exception:
+            pass
+            
+        # 2. Systemweite Einträge (HKEY_LOCAL_MACHINE)
+        try:
+            reg_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, 
+                                     r"Software\Microsoft\Windows\CurrentVersion\Run", 
+                                     0, winreg.KEY_READ)
+            i = 0
+            while True:
+                try:
+                    name, value, type = winreg.EnumValue(reg_key, i)
+                    entries.append({'name': name, 'path': value, 'key': 'HKLM'})
+                    i += 1
+                except OSError:
+                    break
+            winreg.CloseKey(reg_key)
+        except Exception:
+            pass
+            
+        return entries
+        
+    def manage_autostart(self):
+        """Öffnet ein neues Fenster zur Verwaltung der Autostart-Programme."""
+        autostart_entries = self.get_autostart_entries()
+        
+        if not autostart_entries:
+            messagebox.showinfo("Autostart", "Keine konfigurierbaren Autostart-Einträge in der Registry gefunden.")
+            return
+
+        # Zeige die Einträge in einer Meldung an
+        entry_list = "\n".join([f"[{e['key']}] {e['name']}" for e in autostart_entries[:10]]) # Zeige nur die ersten 10
+        
+        message = f"Gefundene Autostart-Einträge ({len(autostart_entries)} insgesamt):\n\n"
+        message += entry_list
+        if len(autostart_entries) > 10:
+             message += f"\n... und {len(autostart_entries) - 10} weitere."
+        
+        messagebox.showinfo("Autostart-Einträge", message)
+        
+        # Biete an, den Task Manager zu öffnen
+        if not messagebox.askyesno("Autostart verwalten", "Möchtest du nun die Windows-Einstellungen (Task Manager) öffnen, um die Programme manuell zu deaktivieren?"):
+            return
+            
+        # Öffne Task Manager > Autostart (Funktioniert ab Win 8)
+        subprocess.run(["taskmgr", "/0 /startup"], check=False)
 
 
 # --- App starten ---
