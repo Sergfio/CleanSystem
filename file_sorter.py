@@ -1,698 +1,292 @@
-import customtkinter as ctk  
-import tkinter as tk         
-from tkinter import filedialog, messagebox
-import os
-import shutil
-from datetime import datetime
-import subprocess
-import hashlib
-import winreg       
-import threading    
+# file_sorter.py
 
-class FileSorterApp:
+import tkinter as tk
+from tkinter import ttk, messagebox
+import os
+import threading 
+
+# NEU: Importiere die Kernlogik
+import sysdoc_core 
+
+# --- 1. FARB- UND STYLING-KONSTANTEN ---
+BG_COLOR = "#2C323D"    # Hintergrundfarbe
+NAV_COLOR = "#292E36"   # Navigationsleisten-Hintergrund
+BUTTON_ACTIVE = "#0078d4" # Aktiver Button-Hintergrund (Blau)
+TEXT_COLOR = "#CCCCCC"  # Haupt-Textfarbe
+CARD_COLOR = "#2B2F35"  # Karten-Hintergrund
+
+class SystemOptimizerApp:
     def __init__(self, master):
         self.master = master
+        master.title("SysDoc Tool")
+        master.configure(bg=BG_COLOR)
+        master.minsize(600, 400) # Mindestgröße
+
+        # Aktuellen, ausgewählten Navigationspunkt speichern
+        self.current_view = tk.StringVar(value="Systemreinigung") # Initialansicht geändert
+
+        # --- 2. Styling-Anpassungen ---
+        style = ttk.Style()
+        style.theme_use('clam') 
+
+        style.configure('Nav.TButton', 
+                        font=('Segoe UI', 12, 'bold'),
+                        background=NAV_COLOR,
+                        foreground=TEXT_COLOR,
+                        relief='flat',
+                        padding=[15, 15])
+        style.map('Nav.TButton',
+                  background=[('active', "#912a2a")],
+                  foreground=[('disabled', '#aaaaaa')])
+
+        style.configure('Active.Nav.TButton',
+                        background=BUTTON_ACTIVE,
+                        foreground=CARD_COLOR)
+
+
+        # --- 3. Haupt-Layout-Frames ---
+        self.nav_frame = tk.Frame(master, width=200, bg=NAV_COLOR)
+        self.nav_frame.pack(side="left", fill="y")
         
-        # --- DESIGN & SKRIPT-IDENTIFIKATION ---
-        ctk.set_appearance_mode("System")  
-        ctk.set_default_color_theme("blue") 
-        
-        try:
-            self.current_script_name = os.path.basename(__file__)
-        except NameError:
-            self.current_script_name = "file_sorter.py"
-        
-        master.title("System- & Datei-Optimierer")
-        
-        # --- Variablen ---
-        self.source_dir = ctk.StringVar(value="") 
-        self.sort_by_extension = ctk.BooleanVar(value=True) 
-        self.sort_by_date = ctk.BooleanVar(value=False)
-        self.date_granularity = ctk.StringVar(value="Year")
-        
-        # Variablen für GUI-Elemente
-        self.cleanup_result_label = None 
-        self.status_label = None
-        self.progress_bar = None
-        self.clean_button = None
-        self.dup_button = None
-        self.temp_thread = None  
-        self.dup_thread = None   
-        
-        self.setup_widgets()
-        
-    def setup_widgets(self):
-        """Erstellt die Tab-Struktur und ruft die Einrichtungsfunktionen für jeden Tab auf."""
-        
-        # 1. Notebook (Tab-Control) durch CTkTabview ersetzen
-        self.notebook = ctk.CTkTabview(self.master)
-        self.notebook.pack(pady=10, padx=10, fill="both", expand=True)
-        
-        # 2. Tabs erstellen
-        self.tab_sorter = self.notebook.add("📁 Datei-Sortierung")
-        self.tab_system = self.notebook.add("🧹 System-Wartung")
-        
-        # 3. Widgets für jeden Tab einrichten
-        self.setup_sorter_tab(self.tab_sorter)
-        self.setup_system_tab(self.tab_system)
+        self.content_frame = tk.Frame(master, bg=BG_COLOR, padx=30, pady=30)
+        self.content_frame.pack(side="right", fill="both", expand=True)
 
-    def setup_sorter_tab(self, tab):
-        """Erstellt die Widgets für den Datei-Sorter Tab."""
-        
-        # Frame für die Verzeichnisauswahl
-        dir_frame = ctk.CTkFrame(tab)
-        dir_frame.pack(padx=10, pady=10, fill="x")
-        
-        ctk.CTkLabel(dir_frame, text="📁 1. Quellordner auswählen").pack(anchor="w", pady=(0, 5))
-        
-        ctk.CTkLabel(dir_frame, text="Pfad:").pack(side=tk.LEFT, padx=(0, 5))
-        
-        entry = ctk.CTkEntry(dir_frame, textvariable=self.source_dir, width=350)
-        entry.pack(side=tk.LEFT, fill="x", expand=True, padx=(0, 5))
-        entry.configure(state=tk.DISABLED) 
-        
-        ctk.CTkButton(dir_frame, text="Durchsuchen...", command=self.browse_directory).pack(side=tk.LEFT)
-        
-        # Frame 2: Kriterien-Auswahl
-        criteria_frame = ctk.CTkFrame(tab)
-        criteria_frame.pack(padx=10, pady=10, fill="x")
-        
-        ctk.CTkLabel(criteria_frame, text="⚙️ 2. Sortierkriterien wählen").pack(anchor="w", pady=(0, 5))
-        
-        ctk.CTkCheckBox(criteria_frame, 
-                        text="Nach Dateiendung sortieren (Ordnernamen in Großbuchstaben)", 
-                        variable=self.sort_by_extension).pack(anchor="w")
-        
-        ctk.CTkCheckBox(criteria_frame, 
-                        text="Nach Erstellungsdatum sortieren (erzeugt Unterordner)", 
-                        variable=self.sort_by_date, 
-                        command=self.toggle_date_options).pack(anchor="w", pady=(5, 0))
+        # --- 4. Navigation (Linke Seitenleiste) ---
+        self.create_nav_bar()
 
-        # Datum-Granularität (Unteroptionen)
-        self.date_options_frame = ctk.CTkFrame(criteria_frame)
-        
-        ctk.CTkLabel(self.date_options_frame, text="Datum-Detailgrad:").pack(side=tk.LEFT, padx=(15, 0))
-        
-        granularity = [("Jahr (2025)", "Year"), ("Jahr/Monat (2025-11)", "Month"), ("Jahr/Monat/Tag (2025-11-15)", "Day")]
-        for text, value in granularity:
-            ctk.CTkRadioButton(self.date_options_frame, 
-                           text=text, 
-                           variable=self.date_granularity, 
-                           value=value).pack(side=tk.LEFT, padx=10)
-
-        # Start-Button
-        ctk.CTkFrame(tab, height=1).pack(fill="x", padx=10, pady=5) 
-        
-        ctk.CTkButton(tab, 
-                  text="🚀 Sortierung starten!", 
-                  command=self.start_sorting, 
-                  font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10) 
-
-        self.toggle_date_options()
-        
-        # --- Fortschrittsanzeige ---
-        progress_frame = ctk.CTkFrame(tab)
-        progress_frame.pack(padx=10, pady=10, fill="x")
-
-        ctk.CTkLabel(progress_frame, text="✅ Sortierungsstatus").pack(anchor="w")
-
-        self.status_label = ctk.CTkLabel(progress_frame, text="Warte auf Start...", anchor="w")
-        self.status_label.pack(fill="x", pady=(0, 5))
-
-        self.progress_bar = ctk.CTkProgressBar(progress_frame, orientation="horizontal")
-        self.progress_bar.set(0)
-        self.progress_bar.pack(fill="x")
-        # ----------------------------------------
+        # --- 5. Initialansicht anzeigen ---
+        self.show_view("Systemreinigung")
 
 
-    def setup_system_tab(self, tab):
-        """Erstellt die Widgets für den System-Wartung Tab."""
-        
-        # --- 1. Temp-Dateien Bereinigung ---
-        temp_frame = ctk.CTkFrame(tab)
-        temp_frame.pack(padx=10, pady=10, fill="x")
-        
-        ctk.CTkLabel(temp_frame, text="🧹 Temporäre Dateien bereinigen").pack(anchor="w")
-
-        ctk.CTkLabel(temp_frame, 
-                 text="Analysiere und lösche temporäre Dateien, um Speicherplatz freizugeben.",
-                 justify=tk.LEFT).pack(anchor="w", pady=(0, 10))
-                 
-        self.cleanup_result_label = ctk.CTkLabel(temp_frame, text="Status: Bereit zur Analyse.", text_color="blue")
-        self.cleanup_result_label.pack(anchor="w", pady=(5, 10))
-        
-        self.clean_button = ctk.CTkButton(temp_frame, 
-                  text="🔍 Analyse & Bereinigung starten", 
-                  command=lambda: self.run_temp_cleaner(is_cleanup=False))
-        self.clean_button.pack(anchor="w", pady=(5, 0))
-        
-        # --- 2. Winget Upgrade ---
-        winget_frame = ctk.CTkFrame(tab)
-        winget_frame.pack(padx=10, fill="x", pady=(10, 0))
-        
-        ctk.CTkLabel(winget_frame, text="⬆️ Software-Updates (Winget)").pack(anchor="w")
-
-        ctk.CTkLabel(winget_frame, 
-                 text="Führt 'winget upgrade --all' aus. Aktualisiert alle installierten Programme.\n(Kann Administratorrechte erfordern!)",
-                 justify=tk.LEFT).pack(anchor="w", pady=(0, 10))
-                 
-        ctk.CTkButton(winget_frame, 
-                  text="🚀 Winget Upgrade starten", 
-                  fg_color="green", hover_color="#27AE60",
-                  command=self.run_winget_upgrade).pack(anchor="w", pady=(5, 0))
-                  
-        # --- 3. Duplikatssuche ---
-        duplicate_frame = ctk.CTkFrame(tab)
-        duplicate_frame.pack(padx=10, fill="x", pady=(10, 0))
-
-        ctk.CTkLabel(duplicate_frame, text="🔍 Doppelte Dateien finden").pack(anchor="w")
-
-        ctk.CTkLabel(duplicate_frame, 
-                 text="Sucht im gewählten Ordner nach identischen Inhalten (SHA256 Hash).",
-                 justify=tk.LEFT).pack(anchor="w", pady=(0, 5))
-                 
-        self.dup_button = ctk.CTkButton(duplicate_frame, 
-                  text="▶️ Duplikatssuche starten", 
-                  fg_color="#FF8000", hover_color="#D86B00", # Orange Töne
-                  command=self.start_duplicate_search)
-        self.dup_button.pack(anchor="w", pady=(5, 0))
-
-        # --- 4. Ungültige Verknüpfungen ---
-        shortcut_frame = ctk.CTkFrame(tab)
-        shortcut_frame.pack(padx=10, fill="x", pady=(10, 0))
-        
-        ctk.CTkLabel(shortcut_frame, text="🔗 Ungültige Verknüpfungen finden").pack(anchor="w")
-
-        ctk.CTkLabel(shortcut_frame, 
-                 text="Sucht nach kaputten '.lnk'-Dateien, deren Ziel nicht mehr existiert.",
-                 justify=tk.LEFT).pack(anchor="w", pady=(0, 5))
-                 
-        ctk.CTkButton(shortcut_frame, 
-                  text="▶️ Suche starten & bereinigen", 
-                  fg_color="#FF8C00", hover_color="#D87800", # Dunkleres Orange
-                  command=self.find_invalid_shortcuts).pack(anchor="w", pady=(5, 0))
-                  
-        # --- 5. Autostart-Verwaltung ---
-        autostart_frame = ctk.CTkFrame(tab)
-        autostart_frame.pack(padx=10, fill="x", pady=(10, 0))
-
-        ctk.CTkLabel(autostart_frame, text="⏱️ Autostart-Programme").pack(anchor="w")
-
-        ctk.CTkLabel(autostart_frame, 
-                 text="Listet Programme auf, die beim Start geladen werden, und öffnet den Task Manager zur Deaktivierung.",
-                 justify=tk.LEFT).pack(anchor="w", pady=(0, 5))
-                 
-        ctk.CTkButton(autostart_frame, 
-                  text="▶️ Autostart prüfen & verwalten", 
-                  fg_color="red", hover_color="#CC0000",
-                  command=self.manage_autostart).pack(anchor="w", pady=(5, 0))
-
-
-    # --- Methoden für die Dateisortierung (Core) ---
-
-    def browse_directory(self):
-        """Öffnet einen Dialog zur Auswahl des Quellverzeichnisses."""
-        directory = filedialog.askdirectory()
-        if directory:
-            self.source_dir.set(directory)
-
-    def toggle_date_options(self):
-        """Zeigt oder versteckt die Datum-Granularitäts-Optionen."""
-        if self.sort_by_date.get():
-            self.date_options_frame.pack(anchor="w")
-        else:
-            self.date_options_frame.pack_forget()
-
-    def start_sorting(self):
-        """Überprüft die Eingaben und startet den Sortiervorgang."""
-        source = self.source_dir.get()
-        sort_ext = self.sort_by_extension.get()
-        sort_date = self.sort_by_date.get()
-
-        if not source or not os.path.isdir(source):
-            messagebox.showerror("Fehler", "Bitte einen gültigen Quellordner auswählen.")
-            return
-
-        if not sort_ext and not sort_date:
-            messagebox.showerror("Fehler", "Bitte mindestens ein Sortierkriterium (Dateiendung oder Datum) auswählen.")
-            return
-
-        # VOR dem Start den Fortschritt zurücksetzen
-        self.progress_bar.set(0)
-        self.status_label.configure(text="Vorbereitung...")
-        self.master.update()
-        
-        confirm = messagebox.askyesno(
-            "Achtung", 
-            f"Soll die Sortierung im Ordner\n'{source}'\njetzt gestartet werden? \nDateien werden VERSCHOBEN."
-        )
-        
-        if confirm:
-            try:
-                moved_count = self.process_files(source, sort_ext, sort_date, self.date_granularity.get())
-                messagebox.showinfo("Erfolg", f"✅ Sortierung abgeschlossen! \n{moved_count} Dateien wurden verschoben.")
-            except Exception as e:
-                messagebox.showerror("Fehler", f"Ein Fehler ist aufgetreten: {e}")
-
-            # Nach Abschluss den Status auf Endzustand setzen
-            self.status_label.configure(text="Sortierung abgeschlossen.")
-            self.progress_bar.set(1.0) 
-            self.master.update()
-
-
-    def get_creation_date_info(self, file_path, granularity):
-        """
-        Gibt den Zeitstempel (Erstellungsdatum) der Datei zurück, 
-        formatiert nach der gewählten Granularität (Year, Month, Day).
-        """
-        try:
-            timestamp = os.path.getctime(file_path) 
-            dt_object = datetime.fromtimestamp(timestamp)
-        except OSError:
-            return "UnknownDate"
-
-        if granularity == "Year":
-            return dt_object.strftime("%Y")
-        elif granularity == "Month":
-            return dt_object.strftime("%Y-%m")
-        elif granularity == "Day":
-            return dt_object.strftime("%Y-%m-%d")
-        
-        return "UnknownDate"
-
-    def process_files(self, source_dir, sort_ext, sort_date, granularity):
-        """
-        Iteriert über alle Dateien, bestimmt den Zielpfad, verschiebt die Dateien 
-        und aktualisiert den Fortschrittsbalken. 
-        """
-        # 1. Alle zu verarbeitenden Dateien im Voraus zählen
-        all_items = os.listdir(source_dir)
-        files_to_process = [
-            item for item in all_items 
-            if not os.path.isdir(os.path.join(source_dir, item)) and 
-               not os.path.islink(os.path.join(source_dir, item)) and
-               item != self.current_script_name # Skript wird ignoriert
-        ]
-        total_files = len(files_to_process)
-        
-        if total_files == 0:
-            return 0 # Nichts zu tun
-
-        # Progress Bar einrichten (Wertebereich 0.0 bis 1.0 in CTk)
-        self.progress_bar.set(0)
-        self.status_label.configure(text=f"Starte Sortierung von {total_files} Dateien...")
-        self.master.update()
-
-        moved_files_count = 0
-        
-        for index, item_name in enumerate(files_to_process):
-            source_path = os.path.join(source_dir, item_name)
-
-            # --- Fortschritt aktualisieren (Feedback) ---
-            progress_value = (index + 1) / total_files
-            self.status_label.configure(text=f"Verarbeite Datei {index + 1}/{total_files}: {item_name}")
-            self.progress_bar.set(progress_value)
-            self.master.update() 
-            # -------------------------------------------
-
-            target_folder_parts = []
-            
-            # A) Datum als oberste Hierarchieebene
-            if sort_date:
-                date_str = self.get_creation_date_info(source_path, granularity)
-                target_folder_parts.append(date_str)
-                
-            # B) Dateiendung als Unterordner
-            if sort_ext:
-                extension = os.path.splitext(item_name)[1].lower().lstrip('.')
-                if not extension:
-                    extension = "NO_EXTENSION"
-                
-                target_folder_parts.append(extension.upper())
-
-            if not target_folder_parts:
-                continue 
-
-            target_dir = os.path.join(source_dir, *target_folder_parts)
-            
-            # Zielordner erstellen
-            os.makedirs(target_dir, exist_ok=True) 
-
-            # Datei verschieben (inkl. Konfliktbehandlung)
-            destination_path = os.path.join(target_dir, item_name)
-            
-            if os.path.exists(destination_path):
-                base, ext = os.path.splitext(item_name)
-                i = 1
-                while os.path.exists(os.path.join(target_dir, f"{base}({i}){ext}")):
-                    i += 1
-                new_item_name = f"{base}({i}){ext}"
-                destination_path = os.path.join(target_dir, new_item_name)
-
-            shutil.move(source_path, destination_path)
-            moved_files_count += 1
-            
-        return moved_files_count
-        
-    # --- Methoden für die Duplikatssuche (Multithreaded) ---
-    
-    def hash_file(self, filepath):
-        """Berechnet den SHA256-Hash einer Datei, blockweise für große Dateien."""
-        BLOCKSIZE = 65536 # 64 KB
-        hasher = hashlib.sha256()
-        try:
-            with open(filepath, 'rb') as afile:
-                buf = afile.read(BLOCKSIZE)
-                while len(buf) > 0:
-                    hasher.update(buf)
-                    buf = afile.read(BLOCKSIZE)
-            return hasher.hexdigest()
-        except Exception:
-            return None
-
-    def find_duplicates(self, source_dir):
-        """Durchsucht den Ordner nach Dateien mit identischem Inhalt."""
-        
-        if not os.path.isdir(source_dir):
-            return "Fehler: Ungültiger Pfad."
-            
-        hashes = {}
-        duplicates_found = 0
-        
-        # Gehe rekursiv durch alle Ordner
-        for dirpath, dirnames, filenames in os.walk(source_dir):
-            dirnames[:] = [d for d in dirnames if not d.startswith('.')]
-            
-            for filename in filenames:
-                filepath = os.path.join(dirpath, filename)
-                
-                if os.path.islink(filepath) or filename == self.current_script_name:
-                    continue
-                
-                file_hash = self.hash_file(filepath)
-                
-                if file_hash:
-                    if file_hash in hashes:
-                        hashes[file_hash].append(filepath)
-                        duplicates_found += 1
-                    else:
-                        hashes[file_hash] = [filepath]
-
-        duplicate_sets = {h: paths for h, paths in hashes.items() if len(paths) > 1}
-        
-        if not duplicate_sets:
-            return "Keine doppelten Dateien gefunden."
-
-        message = f"✅ {duplicates_found} Duplikate in {len(duplicate_sets)} Sets gefunden.\n\n"
-        
-        # Ausgabe der ersten 5 Duplikat-Sets
-        i = 0
-        for h, paths in duplicate_sets.items():
-            if i >= 5:
-                message += f"\n... und {len(duplicate_sets) - 5} weitere Sets."
-                break
-            message += f"Set {i+1} ({len(paths)} Duplikate):\n"
-            for p in paths[1:]: 
-                message += f"  - {p}\n"
-            i += 1
-             
-        return message
-
-    def start_duplicate_search(self):
-        """Startet die Duplikatssuche im Hintergrund und zeigt das Ergebnis an."""
-        
-        source = filedialog.askdirectory(title="Ordner für Duplikatssuche wählen")
-        if not source:
-            messagebox.showwarning("Abgebrochen", "Duplikatssuche wurde abgebrochen.")
-            return
-
-        # PRÜFUNG: Ist der Thread bereits aktiv oder None?
-        is_thread_running = self.dup_thread is not None and self.dup_thread.is_alive()
-        
-        if is_thread_running:
-             messagebox.showwarning("Läuft bereits", "Die Duplikatssuche läuft bereits. Bitte warten Sie, bis der aktuelle Vorgang beendet ist.")
-             return
-
-        # Funktion, die im separaten Thread ausgeführt wird
-        def duplicate_worker():
-            self.set_system_status("Duplikatssuche läuft...", True)
-            self.dup_button.configure(state=tk.DISABLED) 
-            
-            result_message = self.find_duplicates(source)
-            
-            self.set_system_status("Status: Bereit zur Analyse.", False)
-            self.dup_button.configure(state=tk.NORMAL) 
-            
-            # Messagebox muss im Hauptthread angezeigt werden: master.after
-            self.master.after(10, lambda: messagebox.showinfo("Duplikatsergebnisse", result_message))
-
-        # Starte den Thread
-        self.dup_thread = threading.Thread(target=duplicate_worker)
-        self.dup_thread.start()
-
-    # --- Methoden für die System-Wartung (Multithreaded) ---
-    
-    def set_system_status(self, message, is_running):
-        """Aktualisiert das Bereinigungs-Label und steuert die Farben."""
-        if self.cleanup_result_label:
-            # CTk Widgets verwenden configure()
-            self.cleanup_result_label.configure(text=message, text_color="red" if is_running else "blue")
-            self.master.update()
-            
-    def run_winget_upgrade(self):
-        """Führt das Winget-Upgrade für alle installierten Pakete aus. (Im Hauptthread)"""
-        if not messagebox.askyesno("Upgrade bestätigen", "Soll Winget alle installierten Programme aktualisieren? Dies kann Administratorrechte erfordern."):
-            return
-
-        try:
-            result = subprocess.run(
-                ["winget", "upgrade", "--all", "--accept-source-agreements", "--accept-package-agreements"],
-                capture_output=True,
-                text=True,
-                check=True,
-                shell=True,
-                encoding="utf-8"
-            )
-
-            messagebox.showinfo("Winget Upgrade", f"Upgrade-Vorgang abgeschlossen! Details:\n{result.stdout[:500]}...")
-
-        except subprocess.CalledProcessError as e:
-            messagebox.showerror("Winget Fehler", f"Fehler bei winget:\n{e.stderr[:500]}...\nVersuchen Sie, das Tool als Administrator auszuführen.")
-
-        except FileNotFoundError:
-            messagebox.showerror("Winget Fehler", "Der Befehl 'winget' (Windows Package Manager) wurde nicht gefunden.")
-        except UnicodeDecodeError:
-            messagebox.showerror("Kodierungsfehler", "Fehler beim Lesen der Winget-Ausgabe.")
-
-
-    def clean_temp_files(self, dry_run=True):
-        """
-        Sucht temporäre Dateien in bekannten Verzeichnissen und meldet die Funde.
-        """
-        temp_dirs = [
-            os.environ.get('TEMP'), 
-        ]
-
-        deleted_count = 0
-        deleted_size = 0
-
-        for temp_dir in temp_dirs:
-            if not temp_dir or not os.path.exists(temp_dir):
-                continue
-
-            for item in os.listdir(temp_dir):
-                item_path = os.path.join(temp_dir, item)
-
-                try:
-                    if os.path.isfile(item_path):
-                        item_size = os.path.getsize(item_path)
-                        if not dry_run:
-                            os.remove(item_path)
-                            deleted_count += 1
-                            deleted_size += item_size
-
-                    elif os.path.isdir(item_path):
-                        if not os.listdir(item_path) and not dry_run:
-                            os.rmdir(item_path)
-                        elif not dry_run:
-                            shutil.rmtree(item_path)
-
-                except PermissionError:
-                    continue
-                except OSError:
-                    continue
-        
-        size_mb = deleted_size / (1024 * 1024) if deleted_size > 0 else 0
-
-        if dry_run:
-            return f"🔍 Analyse abgeschlossen: {deleted_count} Elemente ({size_mb:.2f} MB) gefunden. Bereit zum Löschen."
-        else:
-            return f"✅ Bereinigung abgeschlossen: {deleted_count} Elemente ({size_mb:.2f} MB) gelöscht."
-
-    def run_temp_cleaner(self, is_cleanup=False):
-        """Startet die Analyse oder die eigentliche Bereinigung im Hintergrund."""
-        
-        # PRÜFUNG: Ist der Thread bereits aktiv oder None?
-        is_thread_running = self.temp_thread is not None and self.temp_thread.is_alive()
-        
-        if is_thread_running:
-             messagebox.showwarning("Läuft bereits", "Die Bereinigung läuft bereits. Bitte warten Sie.")
-             return
-
-        # Funktion, die im separaten Thread ausgeführt wird
-        def cleanup_worker():
-            self.set_system_status("Reinigung läuft...", True)
-            self.clean_button.configure(state=tk.DISABLED) 
-            
-            result = self.clean_temp_files(dry_run=not is_cleanup)
-            
-            self.set_system_status("Status: Bereit zur Analyse.", False)
-            self.clean_button.configure(state=tk.NORMAL)
-            
-            if is_cleanup:
-                self.master.after(10, lambda: messagebox.showinfo("Bereinigung", result))
+    def create_nav_buttons(self, items):
+        """Erstellt eine Reihe von Navigationsbuttons (Hilfsfunktion)."""
+        for text, icon in items:
+            # Wenn auf "Systemreinigung" geklickt wird, soll die Analyse starten
+            if text == "Systemreinigung":
+                command_func = self.action_system_cleanup
             else:
-                self.cleanup_result_label.configure(text=result)
+                command_func = lambda t=text: self.show_view(t)
                 
-                if "0 Elemente" not in result:
-                     if messagebox.askyesno("Bereinigung starten?", 
-                                            f"Sollen die gefundenen Dateien jetzt endgültig gelöscht werden?\n{result}"):
-                        # Starte die echte Bereinigung (erneuter Thread-Start)
-                        self.run_temp_cleaner(is_cleanup=True)
-                else:
-                    self.master.after(10, lambda: messagebox.showinfo("Bereinigung", "Keine temporären Dateien gefunden, die gelöscht werden müssen."))
-        
-        # Starte den Thread
-        self.temp_thread = threading.Thread(target=cleanup_worker)
-        self.temp_thread.start()
+            button = ttk.Button(self.nav_frame, 
+                                text=f"{icon} {text}", 
+                                style='Nav.TButton', 
+                                command=command_func)
+            button.pack(fill='x', pady=5, padx=10)
 
 
-    def find_invalid_shortcuts(self):
-        """
-        Sucht rekursiv nach ungültigen .lnk-Dateien, indem PowerShell 
-        verwendet wird, um deren Zielpfade zu prüfen.
-        """
-        source_dir = filedialog.askdirectory(title="Ordner für die Suche nach ungültigen Verknüpfungen wählen")
-        if not source_dir:
-            return
+    def create_nav_bar(self):
+        """Erstellt die Kopfzeile und die Navigationsbuttons in der linken Leiste."""
+        
+        # Kopfzeile (Symbol und Text)
+        header_label = tk.Label(self.nav_frame, 
+                                text="SysDoc Tool", 
+                                font=('Segoe UI', 11, 'bold'), 
+                                bg=NAV_COLOR, 
+                                fg=TEXT_COLOR,
+                                pady=10, padx=5) 
+        header_label.pack(fill='x')
+        
+        tk.Frame(self.nav_frame, height=1, bg='#e0e0e0').pack(fill='x', padx=10, pady=5)
 
-        invalid_shortcuts = []
-        
-        for root, dirs, files in os.walk(source_dir):
-            for file in files:
-                if file.lower().endswith('.lnk'):
-                    filepath = os.path.join(root, file)
-                    
-                    powershell_command = (
-                        f"powershell -ExecutionPolicy Bypass -Command \"$link = Get-Item -LiteralPath '{filepath}' -ErrorAction SilentlyContinue; "
-                        f"if ($link.Target -eq $null) {{ Write-Host 'INVALID' }} else {{ Write-Host 'VALID' }}\""
-                    )
-                    
-                    try:
-                        result = subprocess.run(
-                            powershell_command, 
-                            capture_output=True, 
-                            text=True, 
-                            check=True, 
-                            encoding="utf-8"
-                        )
-                        
-                        if 'INVALID' in result.stdout.strip().upper():
-                            invalid_shortcuts.append(filepath)
-                            
-                    except Exception as e:
-                        print(f"Fehler bei Verknüpfung {filepath}: {e}")
-                        continue
-        
-        if not invalid_shortcuts:
-            messagebox.showinfo("Ergebnis", "Keine ungültigen Verknüpfungen gefunden.")
-            return
+        # --- HAUPTFUNKTIONEN (Optimierung) ---
+        tk.Label(self.nav_frame, text="OPTIMIERUNG", font=('Segoe UI', 9, 'bold'), 
+                 bg=NAV_COLOR, fg="#888888", anchor='w', padx=20).pack(fill='x', pady=(10, 5))
+                 
+        nav_items_main = [
+            ("Analyse", "🔎"), 
+            ("Systemreinigung", "🗑️"),
+            ("Driver upgrade", "💿"), 
+            ("Software Upgrade", "🔄"),
+            ("Deinstallieren der Apps", "❌")
+        ]
+        # KORRIGIERT: self.create_nav_buttons anstelle von self.create_nav.buttons
+        self.create_nav_buttons(nav_items_main)
 
-        message = f"✅ {len(invalid_shortcuts)} ungültige Verknüpfungen gefunden:\n\n"
-        
-        message += "\n".join(invalid_shortcuts[:10])
-        if len(invalid_shortcuts) > 10:
-             message += f"\n... und {len(invalid_shortcuts) - 10} weitere."
 
-        messagebox.showinfo("Ungültige Verknüpfungen", message)
+        # --- TRENNLINIE & DATEIMANAGEMENT ---
+        tk.Frame(self.nav_frame, height=1, bg='#e0e0e0').pack(fill='x', padx=10, pady=10)
         
-        if messagebox.askyesno("Löschen bestätigen", f"Sollen {len(invalid_shortcuts)} ungültige Verknüpfungen jetzt gelöscht werden?"):
-            deleted_count = 0
-            for shortcut in invalid_shortcuts:
+        tk.Label(self.nav_frame, text="DATEI-TOOLS", font=('Segoe UI', 9, 'bold'), 
+                 bg=NAV_COLOR, fg="#888888", anchor='w', padx=20).pack(fill='x', pady=(0, 5))
+                 
+        nav_items_file = [
+            ("Dateisuche und Sortierung", "🗂️")
+        ]
+        self.create_nav_buttons(nav_items_file)
+
+
+        # --- TRENNLINIE & TOOL-VERWALTUNG ---
+        spacer = tk.Frame(self.nav_frame, bg=NAV_COLOR)
+        spacer.pack(fill='both', expand=True) 
+
+        tk.Frame(self.nav_frame, height=1, bg='#e0e0e0').pack(side='bottom', fill='x', padx=10, pady=10)
+
+        nav_items_admin = [
+            ("Login/Register", "👤"),
+            ("Kontakt", "📧"),
+            ("Einstellungen", "⚙️")
+        ]
+        
+        for text, icon in reversed(nav_items_admin):
+            button = ttk.Button(self.nav_frame, 
+                                text=f"{icon} {text}", 
+                                style='Nav.TButton', 
+                                command=lambda t=text: self.show_view(t))
+            button.pack(side='bottom', fill='x', pady=5, padx=10)
+
+
+    def show_view(self, view_name):
+        """Aktualisiert den Inhalt des rechten Frames basierend auf der Auswahl in der Navigation."""
+        
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        self.current_view.set(view_name)
+        
+        if view_name == "Systemreinigung" or view_name == "Analyse":
+            # Startet die Analyse direkt, wenn man auf den Button klickt
+            self.action_system_cleanup() 
+        else:
+            # Platzhalter für andere Ansichten
+            tk.Label(self.content_frame, 
+                     text=f"🏗️ Ansicht: {view_name} wird entwickelt...", 
+                     font=('Segoe UI', 12, 'bold'), 
+                     bg=BG_COLOR, 
+                     fg=TEXT_COLOR).pack(pady=100)
+            
+        self.update_nav_button_styles()
+
+
+    def update_nav_button_styles(self):
+        """Stellt sicher, dass der aktuell ausgewählte Button blau hervorgehoben wird."""
+        
+        for widget in self.nav_frame.winfo_children():
+            if isinstance(widget, ttk.Button):
+                # Prüfe nur Buttons, die auch in nav_items_main/file/admin definiert sind
                 try:
-                    os.remove(shortcut)
-                    deleted_count += 1
-                except Exception:
+                    button_text = widget.cget('text').split(' ', 1)[1] 
+                except IndexError:
                     continue
-            messagebox.showinfo("Löschung abgeschlossen", f"Es wurden {deleted_count} ungültige Verknüpfungen gelöscht.")
-
-    # --- Autostart-Verwaltung ---
-
-    def get_autostart_entries(self):
-        """Liest Autostart-Einträge aus HKLM und HKCU."""
-        entries = []
-        
-        # 1. Benutzer-spezifische Einträge (HKEY_CURRENT_USER)
-        try:
-            reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 
-                                     r"Software\Microsoft\Windows\CurrentVersion\Run", 
-                                     0, winreg.KEY_READ)
-            i = 0
-            while True:
-                try:
-                    name, value, type = winreg.EnumValue(reg_key, i)
-                    entries.append({'name': name, 'path': value, 'key': 'HKCU'})
-                    i += 1
-                except OSError:
-                    break 
-            winreg.CloseKey(reg_key)
-        except Exception:
-            pass
-            
-        # 2. Systemweite Einträge (HKEY_LOCAL_MACHINE)
-        try:
-            reg_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, 
-                                     r"Software\Microsoft\Windows\CurrentVersion\Run", 
-                                     0, winreg.KEY_READ)
-            i = 0
-            while True:
-                try:
-                    name, value, type = winreg.EnumValue(reg_key, i)
-                    entries.append({'name': name, 'path': value, 'key': 'HKLM'})
-                    i += 1
-                except OSError:
-                    break
-            winreg.CloseKey(reg_key)
-        except Exception:
-            pass
-            
-        return entries
-        
-    def manage_autostart(self):
-        """Öffnet ein neues Fenster zur Verwaltung der Autostart-Programme."""
-        autostart_entries = self.get_autostart_entries()
-        
-        if not autostart_entries:
-            messagebox.showinfo("Autostart", "Keine konfigurierbaren Autostart-Einträge in der Registry gefunden.")
-            return
-
-        entry_list = "\n".join([f"[{e['key']}] {e['name']}" for e in autostart_entries[:10]])
-        
-        message = f"Gefundene Autostart-Einträge ({len(autostart_entries)} insgesamt):\n\n"
-        message += entry_list
-        if len(autostart_entries) > 10:
-             message += f"\n... und {len(autostart_entries) - 10} weitere."
-        
-        messagebox.showinfo("Autostart-Einträge", message)
-        
-        if not messagebox.askyesno("Autostart verwalten", "Möchtest du nun die Windows-Einstellungen (Task Manager) öffnen, um die Programme manuell zu deaktivieren?"):
-            return
-            
-        subprocess.run(["taskmgr", "/0 /startup"], check=False)
+                
+                if button_text == self.current_view.get():
+                    widget.configure(style='Active.Nav.TButton')
+                else:
+                    widget.configure(style='Nav.TButton')
 
 
-# --- App starten ---
+    # --- KERN-LOGIK (AUFRUFE) ---
+
+    def action_system_cleanup(self):
+        """Startet die Systemanalyse in einem separaten Thread."""
+        
+        self.current_view.set("Systemreinigung") 
+        self.update_nav_button_styles()
+        
+        self.show_analysis_view() 
+        
+        # Startet die Analyse im Core-Modul
+        self.analysis_thread = threading.Thread(target=sysdoc_core.run_analysis, args=(self,))
+        self.analysis_thread.start()
+
+    
+    def show_analysis_view(self):
+        """Erstellt die Benutzeroberfläche für die laufende Analyse."""
+        
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+
+        tk.Label(self.content_frame, 
+                 text="Systemanalyse läuft...", 
+                 font=('Segoe UI', 12, 'bold'), 
+                 bg=BG_COLOR, 
+                 fg=TEXT_COLOR).pack(pady=20)
+        
+        self.status_label = tk.Label(self.content_frame, 
+                                     text="🔎 Scanne temporäre Dateien...", 
+                                     font=('Segoe UI', 12), 
+                                     bg=BG_COLOR, 
+                                     fg="#666666")
+        self.status_label.pack(pady=10)
+        
+        self.result_label = tk.Label(self.content_frame, 
+                                     text="Berechnung läuft im Hintergrund...", 
+                                     font=('Segoe UI', 14, 'italic'), 
+                                     bg=BG_COLOR, 
+                                     fg="#0078d4")
+        self.result_label.pack(pady=50)
+
+
+    def display_analysis_results(self, size_bytes):
+        """Zeigt das Endergebnis der Analyse an."""
+        
+        formatted_size = sysdoc_core.format_bytes(size_bytes)
+        
+        self.status_label.configure(text="✅ Analyse abgeschlossen.")
+        self.result_label.configure(text=f"Potenziell freizugebender Speicherplatz: \n\n {formatted_size}", 
+                                    font=('Segoe UI', 14, 'bold'),
+                                    fg="#28a745") 
+        
+        cleanup_button = ttk.Button(self.content_frame, 
+                                    text=f"Jetzt {formatted_size} bereinigen", 
+                                    style='Active.Nav.TButton', 
+                                    command=lambda: self.execute_cleanup(size_bytes))
+        cleanup_button.pack(pady=30)
+        
+        if size_bytes == 0:
+            cleanup_button.configure(text="Nichts zu bereinigen gefunden!", state='disabled')
+
+
+    def execute_cleanup(self, size_bytes):
+        """Startet die tatsächliche Löschfunktion im Core-Modul in einem separaten Thread."""
+        
+        # UI-Feedback, dass die Löschung läuft
+        self.result_label.configure(text=f"🗑️ Bereinigung läuft...", fg="#ffc107", font=('Segoe UI', 14, 'bold'))
+        
+        # Löschvorgang im Hintergrund-Thread starten
+        cleanup_thread = threading.Thread(target=sysdoc_core.execute_system_cleanup, args=(self,))
+        cleanup_thread.start()
+
+
+    def display_cleanup_success(self, deleted_count, total_freed_size):
+        """Zeigt das Endergebnis der erfolgreichen Bereinigung an."""
+        
+        formatted_size = sysdoc_core.format_bytes(total_freed_size)
+        
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+
+        tk.Label(self.content_frame, 
+                 text="Bereinigung abgeschlossen!", 
+                 font=('Segoe UI', 14, 'bold'), 
+                 bg=BG_COLOR, 
+                 fg="#28a745").pack(pady=40)
+                 
+        tk.Label(self.content_frame,
+                 text=f"✅ {formatted_size} Speicherplatz freigegeben.\n"
+                      f"({deleted_count} Dateien und Ordner gelöscht.)",
+                 font=('Segoe UI', 14),
+                 bg=BG_COLOR,
+                 fg=TEXT_COLOR,
+                 justify=tk.CENTER).pack(pady=20)
+
+
+    # --- Platzhalter für andere Funktionen (Diese brauchen noch Implementierung) ---
+
+    def action_clear_browser(self):
+        messagebox.showinfo("Browserverlauf", "Platzhalter: Browserdaten werden gelöscht.")
+
+    def action_clean_registry(self):
+        messagebox.showwarning("Registry", "Platzhalter: Registry wird bereinigt.")
+        
+    def action_update_software(self):
+        messagebox.showinfo("Software", "Platzhalter: Software wird aktualisiert.")
+        
+    def action_analyse(self):
+         messagebox.showinfo("Analyse", "Platzhalter: Detaillierte Systemanalyse.")
+
+
+# --- 7. Hauptausführung des Programms ---
 if __name__ == "__main__":
-    root = ctk.CTk() 
-    app = FileSorterApp(root)
+    root = tk.Tk()
+    app = SystemOptimizerApp(root)
     root.mainloop()

@@ -1,74 +1,80 @@
-# 🖼️ System Optimizer (v1.2 - Modern UI Release)
+# 🖼️ SysDoc Tool
 
-Ein kompaktes, professionelles Desktop-Tool zur effektiven Verwaltung und Bereinigung deines Windows-Systems und deiner Dateisammlungen.
-
----
-
-## ✨ Features & Verbesserungen
-
-### 💻 Benutzeroberfläche & Stabilität (NEU)
-
-* **Modernes Design:** Vollständige Umstellung auf **Customtkinter (CTk)** für eine moderne, ästhetische Oberfläche mit Unterstützung für **Dark/Light Mode**.
-* **Keine Blockaden:** Lange Prozesse wie Duplikatssuche und Temporärdateien-Bereinigung laufen im **Hintergrund (Multithreading)**. Die grafische Oberfläche bleibt jederzeit reaktionsschnell.
-* **Zuverlässiger Start:** Behebung aller kritischen Fehler im Zusammenhang mit Multithreading und Pfad-Referenzen.
-
-### 📁 Datei-Sortierung
-
-Organisiere unübersichtliche Ordner schnell und präzise:
-
-* **Sortierung nach Dateiendung** und **Erstellungsdatum** (nach Jahr/Monat/Tag).
-* **Fortschrittsanzeige** für volle Transparenz während des Sortiervorgangs.
-
-### 🧹 System-Wartung
-
-Halte dein Windows-System sauber und aktuell:
-
-* **Temporäre Dateien:** Analysiert und bereinigt temporäre Systemdateien, um Speicherplatz freizugeben.
-* **Ungültige Verknüpfungen (LNK):** Scannt ausgewählte Verzeichnisse nach defekten Verknüpfungen und bietet eine Option zur direkten Löschung.
-* **Autostart-Verwaltung:** Listet Programme aus der Registry auf, die beim Hochfahren starten, und verweist direkt auf den Windows Task Manager zur Deaktivierung.
-* **Software-Upgrade (Winget):** Führt den Befehl `winget upgrade --all` aus, um alle installierten Anwendungen zu aktualisieren.
-
-### 🔍 Duplikate finden
-
-Sucht rekursiv in einem gewählten Verzeichnis nach **echten Inhaltsduplikaten** mithilfe des SHA-256 Hash-Verfahrens.
+A compact, professional desktop tool for effective management and cleanup of your Windows system and file collections.
 
 ---
 
-## 🚀 Installation & Start
+## ✨ Features & Improvements
 
-### A) Für Endbenutzer (Empfohlen)
+### 💻 User Interface & Stability (NEW)
 
-Die einfachste Methode ist die Verwendung des Installationsprogramms (Setup-Datei). Es ist keine separate Python-Installation erforderlich.
+* **Modern Design:** Complete switch to **Customtkinter (CTk)** for a modern, aesthetic interface with **Dark/Light Mode** support.
+* **Non-Blocking:** Long-running processes like duplicate search and temporary file cleanup operate in the **background (Multithreading)**. The GUI remains responsive at all times.
+* **Reliable Startup:** Fixes for all critical errors related to multithreading and path references.
 
-1.  Lade die Datei **`SystemOptimizer_Setup.exe`** von der [Hier Link zum aktuellen GitHub-Release einfügen] herunter.
-2.  Führe die `SystemOptimizer_Setup.exe` aus und folge den Anweisungen.
-3.  Das Programm wird im Startmenü installiert und kann dort gestartet werden.
+### 📁 File Sorting
 
-### B) Für Entwickler (Aus dem Quellcode)
+Organize cluttered folders quickly and precisely:
 
-Wenn du das Programm aus dem Quellcode ausführen möchtest:
+* Sorting by **file extension** and **creation date** (by year/month/day).
+* **Progress Indicator** for full transparency during the sorting process.
 
-1.  **Repository klonen** und in das Verzeichnis wechseln.
-2.  **Abhängigkeiten installieren:** Das Projekt erfordert `customtkinter` (für das Design).
-    ```bash
-    python -m pip install customtkinter
-    ```
-3.  **Starten:**
-    ```bash
-    python file_sorter.py
-    ```
+### 🧹 System Maintenance
 
----
+Keep your Windows system clean and up to date:
 
-## 💻 Technologien
+* **Temporary Files:** Analyzes and cleans temporary system files to free up disk space.
+* **Invalid Shortcuts (LNK):** Scans selected directories for broken shortcuts and offers a direct deletion option.
+* **Startup Management:** Lists programs from the Registry that start upon boot-up, and directly links to the Windows Task Manager for deactivation.
+* **Software Upgrade (Winget):** Executes the command `winget upgrade --all` to update all installed applications.
 
-* **Hauptsprache:** Python 3.x
-* **GUI-Framework:** `Customtkinter` (CTk)
-* **Verpackung:** `PyInstaller` (EXE) & `Inno Setup` (Installer)
-* **Systemfunktionen:** `winreg` (Registry-Zugriff), `subprocess` (Winget/PowerShell-Aufrufe), `threading` (Asynchrone Ausführung).
+### 🔍 Duplicate Finder
+
+Recursively searches a chosen directory for **true content duplicates** using the SHA-256 hashing method.
 
 ---
 
-## 📄 Lizenz
+## 🇩🇪 Deutsche Version
 
-Dieses Projekt steht unter der [MIT License].
+Hier finden Sie die deutsche Beschreibung des Tools.
+
+---
+
+## 🚀 Installation & Start (Installation & Startup)
+
+### A) For End Users (Recommended) / Für Endbenutzer (Empfohlen)
+
+The easiest method is using the installer (setup file). No separate Python installation is required.
+
+1.  Download the file **`SystemOptimizer_Setup.exe`** from the [Insert link to the current GitHub release here] release page.
+2.  Execute `SystemOptimizer_Setup.exe` and follow the instructions.
+3.  The program will be installed in the Start Menu and can be launched from there.
+
+### B) For Developers (From Source Code) / Für Entwickler (Aus dem Quellcode)
+
+If you wish to run the program from source code:
+
+1.  **Clone the repository** and change into the directory.
+2.  **Install dependencies:** The project requires `customtkinter` (for the design).
+    ```bash
+    python -m pip install customtkinter
+    ```
+3.  **Start:**
+    ```bash
+    python file_sorter.py
+    ```
+
+---
+
+## 💻 Technologies
+
+* **Main Language:** Python 3.x
+* **GUI Framework:** `Customtkinter` (CTk)
+* **Packaging:** `PyInstaller` (EXE) & `Inno Setup` (Installer)
+* **System Functions:** `winreg` (Registry access), `subprocess` (Winget/PowerShell calls), `threading` (Asynchronous execution).
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License].
